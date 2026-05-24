@@ -8,29 +8,31 @@ from dotenv import load_dotenv
 import pdfplumber
 
 # -------------------------
-# 环境变量 & 代理
+# 环境变量
 # -------------------------
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-os.environ["HTTP_PROXY"] = "http://127.0.0.1:10809"
-os.environ["HTTPS_PROXY"] = "http://127.0.0.1:10809"
+# ❗ 删除本地代理（Render 上不能用）
+# os.environ["HTTP_PROXY"] = "http://127.0.0.1:10809"
+# os.environ["HTTPS_PROXY"] = "http://127.0.0.1:10809"
 
 # -------------------------
 # Flask 初始化
 # -------------------------
 app = Flask(__name__)
-CORS(app)  # 允许前端跨域访问
+CORS(app)
 
 # -------------------------
-# 全局向量数据库
+# 全局向量数据库（lazy-load）
 # -------------------------
-embeddings = []
-chunks = []
+embeddings = None
+chunks = None
 dimension = 768
 
+
 # -------------------------
-# PDF → 文本（使用 pdfplumber，最稳定）
+# PDF → 文本
 # -------------------------
 def extract_text_from_pdf(pdf_path):
     text = ""
@@ -40,14 +42,16 @@ def extract_text_from_pdf(pdf_path):
             text += page_text + "\n"
     return text
 
+
 # -------------------------
 # 文本分块
 # -------------------------
 def chunk_text(text, chunk_size=500):
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
+
 # -------------------------
-# Gemini Embedding（embedding-001）
+# Gemini Embedding（带 timeout）
 # -------------------------
 def get_embedding(text):
     url = "https://generativelanguage.googleapis.com/v1/models/embedding-001:embedContent"
@@ -57,20 +61,20 @@ def get_embedding(text):
         "content": {"parts": [{"text": text}]}
     }
 
-    response = requests.post(
-        url,
-        params={"key": GEMINI_API_KEY},
-        headers={"Content-Type": "application/json"},
-        json=payload
-    )
-
-    data = response.json()
-
     try:
+        response = requests.post(
+            url,
+            params={"key": GEMINI_API_KEY},
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=10   # ❗ 避免卡死
+        )
+        data = response.json()
         return np.array(data["embedding"]["values"], dtype="float32")
-    except:
-        print("Embedding Error:", data)
+    except Exception as e:
+        print("Embedding Error:", e)
         return np.zeros(dimension, dtype="float32")
+
 
 # -------------------------
 # 余弦相似度
@@ -82,12 +86,15 @@ def cosine_similarity(a, b):
         return 0
     return float(np.dot(a, b) / (na * nb))
 
+
 # -------------------------
-# 检索（永远返回 top_k，不会空）
+# 检索
 # -------------------------
 def search_similar(query_emb, top_k=3):
-    valid = [(i, emb) for i, emb in enumerate(embeddings) if np.linalg.norm(emb) > 0]
+    if embeddings is None:
+        return []
 
+    valid = [(i, emb) for i, emb in enumerate(embeddings) if np.linalg.norm(emb) > 0]
     if not valid:
         return []
 
@@ -96,35 +103,32 @@ def search_similar(query_emb, top_k=3):
 
     return [i for i, s in scores[:top_k]]
 
+
 # -------------------------
-# Gemini 回答
+# Gemini 回答（带 timeout）
 # -------------------------
 def ask_gemini(prompt):
     url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
 
     payload = {
         "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
+            {"parts": [{"text": prompt}]}
         ]
     }
 
-    response = requests.post(
-        url,
-        params={"key": GEMINI_API_KEY},
-        headers={"Content-Type": "application/json"},
-        json=payload
-    )
-
-    data = response.json()
-
     try:
+        response = requests.post(
+            url,
+            params={"key": GEMINI_API_KEY},
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=10   # ❗ 避免卡死
+        )
+        data = response.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
-    except:
-        return f"Gemini API Error: {data}"
+    except Exception as e:
+        return f"Gemini API Error: {e}"
+
 
 # -------------------------
 # /process_pdf
@@ -140,20 +144,13 @@ def process_pdf():
     pdf_path = "uploaded.pdf"
     file.save(pdf_path)
 
-    print("PDF received")
-
     text = extract_text_from_pdf(pdf_path)
-    print("PDF text length:", len(text))
-
-    chunks = chunk_text(text)
-    chunks = [c for c in chunks if c.strip() != ""]
-    print("Chunks:", len(chunks))
+    chunks = [c for c in chunk_text(text) if c.strip() != ""]
 
     embeddings = [get_embedding(c) for c in chunks]
 
-    print("First embedding sample:", embeddings[0][:10] if embeddings else "None")
-
     return jsonify({"message": "PDF processed", "chunks": len(chunks)})
+
 
 # -------------------------
 # /ask
@@ -161,6 +158,9 @@ def process_pdf():
 @app.route("/ask", methods=["POST"])
 def ask():
     global embeddings, chunks
+
+    if embeddings is None or chunks is None:
+        return jsonify({"error": "PDF not processed yet"}), 400
 
     data = request.get_json()
     question = data.get("question", "")
@@ -178,13 +178,12 @@ def ask():
 
     answer = ask_gemini(prompt)
 
-    return jsonify({
-        "answer": answer,
-        "related_chunks": related
-    })
+    return jsonify({"answer": answer, "related_chunks": related})
+
 
 # -------------------------
-# 主程序
+# 主程序（Render 不会用到）
 # -------------------------
 if __name__ == "__main__":
     app.run(debug=True)
+
