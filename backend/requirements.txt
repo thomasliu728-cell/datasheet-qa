@@ -7,3 +7,4 @@ pydantic
 gunicorn
 numpy
 flask
+flask-cors
