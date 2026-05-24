@@ -1,0 +1,19 @@
+# Python venv
+backend/venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+backend/.env
+
+# Uploaded or temporary files
+uploaded.pdf
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
