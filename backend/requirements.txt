@@ -8,3 +8,4 @@ gunicorn
 numpy
 flask
 flask-cors
+pdfplumber
