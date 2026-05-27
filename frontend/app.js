@@ -1,9 +1,13 @@
+<<<<<<< HEAD
 const isLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
 
 const API_BASE = isLocal
   ? "http://127.0.0.1:5000"
   : "https://datasheet-qa-backend.onrender.com";
 
+=======
+const API_BASE = "https://datasheet-qa-backend.onrender.com";
+>>>>>>> 091d4e9085e08a6f57675bc340acf55c02b9105b
 
 // 上传 PDF
 async function uploadPDF() {
